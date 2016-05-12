@@ -6,8 +6,6 @@ module ActiveRecord
   module AllowConnectionFailure
     # monkeypatches activerecord/lib/active_record/query_cache.rb
     ActiveRecord::QueryCache.class_eval do
-      require 'pry'
-      binding.pry
       def self.run
         if ActiveRecord::Base.connected?
           connection    = ActiveRecord::Base.connection
