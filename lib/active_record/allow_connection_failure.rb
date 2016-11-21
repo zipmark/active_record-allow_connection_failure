@@ -39,17 +39,20 @@ module ActiveRecord
     end
 
     # monkeypatches activerecord/lib/active_record/migration.rb
-    ActiveRecord::Migration::CheckPending.class_eval do
-      def call(env)
-        if ActiveRecord::Base.connected? && connection.supports_migrations?
-          mtime = ActiveRecord::Migrator.last_migration.mtime.to_i
-          if @last_check < mtime
-            ActiveRecord::Migration.check_pending!(connection)
-            @last_check = mtime
-          end
-        end
-        @app.call(env)
-      end
-    end
+     # CheckPending introduced after Rails 4.0
+     if Rails::VERSION::MAJOR >= 4
+       ActiveRecord::Migration::CheckPending.class_eval do
+         def call(env)
+           if ActiveRecord::Base.connected? && connection.supports_migrations?
+             mtime = ActiveRecord::Migrator.last_migration.mtime.to_i
+             if @last_check < mtime
+               ActiveRecord::Migration.check_pending!(connection)
+               @last_check = mtime
+             end
+           end
+           @app.call(env)
+         end
+       end
+     end
   end
 end
