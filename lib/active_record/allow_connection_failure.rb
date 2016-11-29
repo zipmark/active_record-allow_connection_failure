@@ -41,11 +41,9 @@ module ActiveRecord
         end
       end
       
-      module ActiveRecord
-        class Base
-          def self.clear_cache! # :nodoc:
-            connection.schema_cache.clear! if connected?
-          end
+      ActiveRecord::ModelSchema::ClassMethods.module_eval do
+        def clear_cache! # :nodoc:
+          connection.schema_cache.clear! if connected?
         end
       end
     end
