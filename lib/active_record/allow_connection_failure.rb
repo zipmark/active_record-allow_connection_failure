@@ -5,54 +5,98 @@ require "active_record/allow_connection_failure/version"
 module ActiveRecord
   module AllowConnectionFailure
     # monkeypatches activerecord/lib/active_record/query_cache.rb
-    ActiveRecord::QueryCache.class_eval do
-      def self.run
-        if ActiveRecord::Base.connected?
-          connection    = ActiveRecord::Base.connection
-          enabled       = connection.query_cache_enabled
-          connection_id = ActiveRecord::Base.connection_id
-          connection.enable_query_cache!
-
-          [enabled, connection_id]
+    if Rails::VERSION::MAJOR == 3
+      module ActiveRecord
+        class Base
+          def self.clear_cache! # :nodoc:
+            puts "Am I connected? #{connected?}"
+            connection.schema_cache.clear! if connected?
+          end
         end
       end
 
-      def self.complete(state)
-        if ActiveRecord::Base.connected?
-          enabled, connection_id = state
-
-          ActiveRecord::Base.connection_id = connection_id
-          ActiveRecord::Base.connection.clear_query_cache
-          ActiveRecord::Base.connection.disable_query_cache! unless enabled
+      ActiveRecord::QueryCache::BodyProxy.class_eval do
+        def close
+          @target.close if @target.respond_to?(:close)
+        ensure
+          ActiveRecord::Base.connection_id = @connection_id
+          if ActiveRecord::Base.connected?
+            ActiveRecord::Base.connection.clear_query_cache
+            unless @original_cache_value
+              ActiveRecord::Base.connection.disable_query_cache!
+            end
+          end
         end
       end
 
-      def self.install_executor_hooks(executor = ActiveSupport::Executor)
-        executor.register_hook(self)
-
-        executor.to_complete do
-          unless ActiveRecord::Base.connected? && ActiveRecord::Base.connection.transaction_open?
-            ActiveRecord::Base.clear_active_connections!
+      ActiveRecord::QueryCache.class_eval do
+        def call(env)
+          begin
+            if ActiveRecord::Base.connected?
+              old = ActiveRecord::Base.connection.query_cache_enabled
+              ActiveRecord::Base.connection.enable_query_cache!
+            end
+            
+            status, headers, body = @app.call(env)
+            [status, headers, ActiveRecord::QueryCache::BodyProxy.new(old, body, ActiveRecord::Base.connection_id)]
+          rescue Exception => e
+            raise e.inspect
+            ActiveRecord::Base.connection.clear_query_cache
+            unless old
+              ActiveRecord::Base.connection.disable_query_cache!
+            end
+            raise e
           end
         end
       end
     end
+    
+    if Rails::VERSION::MAJOR >= 4
+      ActiveRecord::QueryCache.class_eval do
+        def self.run
+          if ActiveRecord::Base.connected?
+            connection    = ActiveRecord::Base.connection
+            enabled       = connection.query_cache_enabled
+            connection_id = ActiveRecord::Base.connection_id
+            connection.enable_query_cache!
 
-    # monkeypatches activerecord/lib/active_record/migration.rb
-     # CheckPending introduced after Rails 4.0
-     if Rails::VERSION::MAJOR >= 4
-       ActiveRecord::Migration::CheckPending.class_eval do
-         def call(env)
-           if ActiveRecord::Base.connected? && connection.supports_migrations?
-             mtime = ActiveRecord::Migrator.last_migration.mtime.to_i
-             if @last_check < mtime
-               ActiveRecord::Migration.check_pending!(connection)
-               @last_check = mtime
-             end
+            [enabled, connection_id]
+          end
+        end
+
+        def self.complete(state)
+          if ActiveRecord::Base.connected?
+            enabled, connection_id = state
+
+            ActiveRecord::Base.connection_id = connection_id
+            ActiveRecord::Base.connection.clear_query_cache
+            ActiveRecord::Base.connection.disable_query_cache! unless enabled
+          end
+        end
+
+        def self.install_executor_hooks(executor = ActiveSupport::Executor)
+          executor.register_hook(self)
+
+          executor.to_complete do
+            unless ActiveRecord::Base.connected? && ActiveRecord::Base.connection.transaction_open?
+              ActiveRecord::Base.clear_active_connections!
+            end
+          end
+        end
+      end
+      
+      ActiveRecord::Migration::CheckPending.class_eval do
+       def call(env)
+         if ActiveRecord::Base.connected? && connection.supports_migrations?
+           mtime = ActiveRecord::Migrator.last_migration.mtime.to_i
+           if @last_check < mtime
+             ActiveRecord::Migration.check_pending!(connection)
+             @last_check = mtime
            end
-           @app.call(env)
          end
+         @app.call(env)
        end
      end
-  end
+   end
+ end
 end
