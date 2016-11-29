@@ -6,15 +6,6 @@ module ActiveRecord
   module AllowConnectionFailure
     # monkeypatches activerecord/lib/active_record/query_cache.rb
     if Rails::VERSION::MAJOR == 3
-      module ActiveRecord
-        class Base
-          def self.clear_cache! # :nodoc:
-            puts "Am I connected? #{connected?}"
-            connection.schema_cache.clear! if connected?
-          end
-        end
-      end
-
       ActiveRecord::QueryCache::BodyProxy.class_eval do
         def close
           @target.close if @target.respond_to?(:close)
@@ -46,6 +37,14 @@ module ActiveRecord
               ActiveRecord::Base.connection.disable_query_cache!
             end
             raise e
+          end
+        end
+      end
+      
+      module ActiveRecord
+        class Base
+          def self.clear_cache! # :nodoc:
+            connection.schema_cache.clear! if connected?
           end
         end
       end
